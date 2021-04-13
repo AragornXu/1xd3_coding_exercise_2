@@ -1,0 +1,212 @@
+myTitle = "Move the monkey!"
+timeToDrop = 1
+halfToAppear = 5
+timeToAppear = 2 * halfToAppear
+letterWidth = 7
+dScale = 1/4 -- size
+
+type alias Model = { time : Float
+                   , animation : GuessState
+                   , score : Int
+                   , pics : List ( { time : Float } -> List (Shape Msg) )
+                   , correct : Pick
+                   , letters : List Char
+                   , school : String
+                   , username : String
+                   , nextRand : (List Int, Int)
+                   , badTime : Float
+                   , debug : String
+                   , wasd : (Float, Float)
+                   , pos : (Float,Float)
+                   }
+init : Model
+init = { time = 0
+       , animation = Startup
+       , score = 0
+       , pics = [ \ _ -> [],  \ _ -> [],  \ _ -> [],  \ _ -> []]
+       , correct = Pick1
+       , letters = ['n','o','t',' ','r','e','a','d','y']
+       , school = ""
+       , username = ""
+       , nextRand = ([-1,-1,-1,-1],0)
+       , badTime = pi -- time for the bad-pick animation
+       , debug = ""
+       , wasd = (0,0)
+       , pos = (0,-40)
+       }
+-- phase of the game
+type GuessState = Waiting              -- waiting for click
+                | BadPick Pick Float   -- animating bad pick, with time in seconds left
+                | GoodPick Float       -- animating good pick, with time in seconds left
+                | Startup              -- waiting for the first random numbers
+type Msg = Tick Float GetKeyState
+         | RandIdx (List Int, Int)  -- four pics to display and 0..3 for the one which will be correct
+         
+-- type allowing 4 "picks", added NotAPick as a state for when the monkey does not touch either of the pics
+type Pick = Pick0 | Pick1 | Pick2 | Pick3 | NotAPick
+
+-- convert a (random) Int to a Pick
+int2Pick i = case i of
+               1 -> Pick1
+               2 -> Pick2
+               3 -> Pick3
+               0 -> Pick0
+               _ -> NotAPick
+               
+-- get one of the first 4 things from the word list, otherwise make it blank
+listPick idx lst = case (idx,lst) of
+                     (0, x :: _ ) -> x
+                     (1, _ :: x :: _ ) -> x
+                     (2, _ :: _ :: x :: _ ) -> x
+                     (3, _ :: _ :: _ :: x :: _ ) -> x
+                     (_, _) -> (\ _ -> [], ("","",""))
+                     
+-- where the different picks will show up on the screen
+pickPositions = [ (Pick0, (-24, 36)) -- x:-48~0 y: 20~52
+                , (Pick1, ( 24, 36)) -- x:0~48  y: 20~52
+                , (Pick2, (-72, 36)) -- x:-96~-48 y: 20~52
+                , (Pick3, ( 72, 36)) -- x:48~96 y: 20~52
+                ]
+addPos pos1 pos2 = (Tuple.first pos1 + Tuple.first pos2, Tuple.second pos1 + Tuple.second pos2)
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg m =
+ let model = case msg of
+               Tick _ _ -> m
+               _ -> m
+ in
+  case msg of
+    RandIdx (idxsBad,correct) ->
+      let
+          idxs = removeDups [] idxsBad
+
+          -- WARNING will recurse infinitely if arrayLength < 4
+          removeDups uniques next =
+            case next of
+              [] -> uniques
+              n :: ns -> removeDups ((fix uniques n)::uniques) ns
+
+          fix uniques n = if List.member n uniques
+                          then if n+1 == arrayLength then fix uniques 0 else fix uniques (n+1)
+                          else n
+
+      in
+          if model.animation == Startup
+                                then let
+                                       fourWords = List.map getWord idxs
+                                       (un,w,s) = Tuple.second <| listPick correct fourWords
+                                     in
+                                       ( { model | animation = Waiting
+                                                 , correct = int2Pick correct
+                                                 , pics = List.map Tuple.first fourWords
+                                                 , username = un
+                                                 , letters = stringToChars w
+                                                 , school = s
+                                         }
+                                       , getRandChoices )
+
+                                else ( { model | nextRand = (idxs,correct) }, Cmd.none )
+
+    Tick t (_,_,(x,y)) ->
+      let lastTime = if model.time > 0 then model.time else t
+          x1 = Tuple.first model.pos
+          y1 = Tuple.second model.pos
+          pick1 = if (x1 <= -96 || x1 == -48 || x1 == 0 || x1 == 48 || x1 >= 96 || y1 <= 20 || y1 >= 52) then
+                   4
+                 else if (x1 > -48 && x1 <0) then
+                   0
+                 else if (x1 > 0 && x1 <48) then
+                   1
+                 else if (x1 > -96 && x1 < (-48)) then
+                   2
+                 else
+                   3
+      in case model.animation of
+           Startup ->  ( { model | time = t
+                                 , animation = Startup
+                                 , wasd = (x,y)
+                                 , pos = addPos model.pos (x,y)
+                         }
+                       , Cmd.none )
+           Waiting -> if (int2Pick pick1) == model.correct then
+                        ( { model | animation = GoodPick <| model.badTime, score = model.score + 1 }, getRandChoices )
+                      else if pick1 == 4 then
+                       ( { model | time = t
+                               , animation = Waiting
+                               , wasd = (x,y)
+                               , pos = addPos model.pos (x,y)
+                         }
+                       , Cmd.none )
+                      else
+                        ( { model | animation = BadPick (int2Pick pick1) model.badTime }, Cmd.none )
+           BadPick pick tLeft
+             -> if tLeft < t - lastTime
+                  then ( { model | time = t
+                               , animation = Waiting
+                               , pos = (0,-40)
+                         }
+                       , Cmd.none )
+                  else ( { model | time = t
+                               , animation = BadPick pick (tLeft - (t - lastTime))
+                               , pos = (0,-40)
+                         }
+                       , Cmd.none )
+           GoodPick tLeft
+             -> if tLeft < t - lastTime
+                  then let
+                         (idxs,correct) = model.nextRand
+                         fourWords = List.map getWord idxs
+                         (un,w,s) = Tuple.second <| listPick correct fourWords
+                       in
+                         ( { model | animation = Waiting
+                                   , correct = int2Pick correct
+                                   , pics = List.map Tuple.first fourWords
+                                   , username = un
+                                   , letters = stringToChars w
+                                   , badTime = model.badTime * 0.9
+                                   , school = s
+                                   , time = t
+                                   , pos = (0,-40)
+                           }
+                         , getRandChoices )
+                  else ( { model | time = t
+                               , animation = GoodPick (tLeft - (t - lastTime))
+                               , pos = (0,-40)
+                         }
+                       , Cmd.none )
+                       
+view : Model -> Collage Msg
+view model = collage 192 128
+  <| ( case model.animation of
+           Startup ->  [ text "Read the word and tap on the picture!" |> size 20 |> filled (rgb 255 0 255) ]
+           Waiting ->  ( List.map2 (drawPic model.time) model.pics pickPositions )
+                       ++
+                       (List.indexedMap (oneLetter 0 1) model.letters)
+                       ++ [circle 10 |> filled lightBlue |> move model.pos]
+                       ++ ( List.map2 (drawMsg model.time) model.pics pickPositions )
+           BadPick pick tLeft
+                   ->  ( List.map2 (drawBad pick tLeft) model.pics pickPositions )
+                       ++
+                       ( List.indexedMap (oneLetter 0 1) model.letters)
+           GoodPick tLeft
+                   ->  ( List.map2 (drawGood model.correct (max 0 (2 * (model.badTime - tLeft) / model.badTime)) model.time)
+                                   model.pics
+                                   pickPositions )
+                       ++
+                       ( List.indexedMap (oneLetter tLeft model.badTime) model.letters)
+                       ++
+                       [ "Score: " ++ String.fromInt model.score |> text |> bold |> fixedwidth |> filled (rgb (125 + 125 * sin (20 * model.time)) 0 0) |> move (10,-4) ]
+     ) ++[ "Score: " ++ String.fromInt model.score |> text |> fixedwidth |> filled black |> move (10,-4)
+         -- when you make your own game, you can use this to display debug information
+         --, model.debug |> text |> filled blue |> move (-86,-20)
+         ]
+drawMsg t pic (msg, pos) = group [ rect 80 55 |> filled (rgba 0 0 0 0) |> move pos ]-- |> notifyTap (Choice msg)                                    ]
+drawPic t pic (msg, pos) = (group <| pic { time = t }) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
+drawBad pick t pic (msg, pos) = if pick == msg
+                                  then ((group <| pic { time = t }) |> move (10 * cos (30*t),0)) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
+                                  else (group <| pic { time = t }) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
+drawGood pick frac t pic (msg, pos) = if pick == msg
+                                  then ((group <| pic { time = t })) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
+                                  else (group <| pic { time = t } ++ [rect 192 128 |> filled (rgba 255 255 255 frac)] ) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
+getRandChoices = Random.generate RandIdx (Random.map5 ( \ i j k l c -> ([i,j,k,l],c) ) oneRandIdx oneRandIdx oneRandIdx oneRandIdx rand0to3)
+oneRandIdx = Random.int 0 (arrayLength - 1)
+rand0to3   = Random.int 0 3
