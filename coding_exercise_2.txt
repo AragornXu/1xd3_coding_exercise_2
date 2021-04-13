@@ -1,4 +1,4 @@
-myTitle = "Move the monkey!"
+myTitle = "Move the robot!"
 timeToDrop = 1
 halfToAppear = 5
 timeToAppear = 2 * halfToAppear
@@ -34,6 +34,20 @@ init = { time = 0
        , wasd = (0,0)
        , pos = (0,-40)
        }
+object = group
+  [ circle 18|> filled lightBrown
+  , circle 7 |> filled (rgb 255 229 204) |> move(-7,0)
+  , circle 7 |> filled (rgb 255 229 204) |> move(7,0)
+  , oval 30 20 |> filled (rgb 255 229 204) |> move(0,-7)
+  , circle 5 |> filled white |> move (7,0)
+  , circle 5 |> filled white |> move (-7,0)
+  , circle 3.5 |> filled black |> move(-7,0)
+  , circle 3.5 |> filled black |> move(7,0)
+  , circle 1.5 |> filled white |> move(-8,2)
+  , circle 1.5 |> filled white |> move(6,2)
+  , rect 5 4 |> filled black |> move(0,-10)
+ ] |> scale 0.5
+ 
 -- phase of the game
 type GuessState = Waiting              -- waiting for click
                 | BadPick Pick Float   -- animating bad pick, with time in seconds left
@@ -42,7 +56,7 @@ type GuessState = Waiting              -- waiting for click
 type Msg = Tick Float GetKeyState
          | RandIdx (List Int, Int)  -- four pics to display and 0..3 for the one which will be correct
          
--- type allowing 4 "picks", added NotAPick as a state for when the monkey does not touch either of the pics
+-- type allowing 4 "picks", added NotAPick as a state for when the robot does not touch either of the pics
 type Pick = Pick0 | Pick1 | Pick2 | Pick3 | NotAPick
 
 -- convert a (random) Int to a Pick
@@ -181,7 +195,7 @@ view model = collage 192 128
            Waiting ->  ( List.map2 (drawPic model.time) model.pics pickPositions )
                        ++
                        (List.indexedMap (oneLetter 0 1) model.letters)
-                       ++ [circle 10 |> filled lightBlue |> move model.pos]
+                       ++ [object |> move model.pos]
                        ++ ( List.map2 (drawMsg model.time) model.pics pickPositions )
            BadPick pick tLeft
                    ->  ( List.map2 (drawBad pick tLeft) model.pics pickPositions )
