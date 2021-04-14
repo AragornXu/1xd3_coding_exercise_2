@@ -18,6 +18,7 @@ type alias Model = { time : Float
                    , debug : String
                    , wasd : (Float, Float)
                    , pos : (Float,Float)
+                   , lives : Int
                    }
 init : Model
 init = { time = 0
@@ -33,26 +34,42 @@ init = { time = 0
        , debug = ""
        , wasd = (0,0)
        , pos = (0,-40)
+       , lives = 3
        }
 object = group
   [ circle 18|> filled lightBrown
-  , circle 7 |> filled (rgb 255 229 204) |> move(-7,0)
-  , circle 7 |> filled (rgb 255 229 204) |> move(7,0)
-  , oval 30 20 |> filled (rgb 255 229 204) |> move(0,-7)
-  , circle 5 |> filled white |> move (7,0)
-  , circle 5 |> filled white |> move (-7,0)
-  , circle 3.5 |> filled black |> move(-7,0)
-  , circle 3.5 |> filled black |> move(7,0)
-  , circle 1.5 |> filled white |> move(-8,2)
-  , circle 1.5 |> filled white |> move(6,2)
-  , rect 5 4 |> filled black |> move(0,-10)
- ] |> scale 0.5
- 
+   , circle 7 |> filled (rgb 255 229 204) |> move(-7,0)
+   , circle 7 |> filled (rgb 255 229 204) |> move(7,0)
+   , oval 30 20 |> filled (rgb 255 229 204) |> move(0,-7)
+   , circle 5 |> filled white |> move (7,0)
+   , circle 5 |> filled white |> move (-7,0)
+   , circle 3.5 |> filled black |> move(-7,0)
+   , circle 3.5 |> filled black |> move(7,0)
+   , circle 1.5 |> filled white |> move(-8,2)
+   , circle 1.5 |> filled white |> move(6,2)
+   , rect 5 4 |> filled black |> move(0,-10)
+  ] |> scale 0.5
+hearts n = if n > 1 then
+             [heart |> move (-90 + 10 * Basics.toFloat(n) , -40)] ++ hearts (n-1)
+           else if n == 1 then
+             [heart |> move (-80,-40)]
+           else 
+             []
+heart = group [ oval 10 15 
+                  |> filled red 
+                  |> move (-2, 0) 
+                  |> rotate (degrees 150)
+              , oval 10 15 
+                  |> filled red 
+                  |> move (-2, 0) 
+                  |> rotate (degrees 30)
+               ] |> scale 0.5
 -- phase of the game
 type GuessState = Waiting              -- waiting for click
                 | BadPick Pick Float   -- animating bad pick, with time in seconds left
                 | GoodPick Float       -- animating good pick, with time in seconds left
                 | Startup              -- waiting for the first random numbers
+                | GameOver             -- player lost all their lives
 type Msg = Tick Float GetKeyState
          | RandIdx (List Int, Int)  -- four pics to display and 0..3 for the one which will be correct
          
@@ -109,18 +126,18 @@ update msg m =
                                        fourWords = List.map getWord idxs
                                        (un,w,s) = Tuple.second <| listPick correct fourWords
                                      in
-                                       ( { model | animation = Waiting
+                                       ( { model | animation = Startup
                                                  , correct = int2Pick correct
                                                  , pics = List.map Tuple.first fourWords
                                                  , username = un
                                                  , letters = stringToChars w
                                                  , school = s
                                          }
-                                       , getRandChoices )
+                                       , Cmd.none)
 
                                 else ( { model | nextRand = (idxs,correct) }, Cmd.none )
 
-    Tick t (_,_,(x,y)) ->
+    Tick t (checkKey,_,(x,y)) ->
       let lastTime = if model.time > 0 then model.time else t
           x1 = Tuple.first model.pos
           y1 = Tuple.second model.pos
@@ -134,14 +151,21 @@ update msg m =
                    2
                  else
                    3
+          enter = if (checkKey Enter == Down) then True else False
       in case model.animation of
            Startup ->  ( { model | time = t
-                                 , animation = Startup
+                                 , animation = case enter of
+                                                 True -> Waiting
+                                                 _ -> Startup
                                  , wasd = (x,y)
-                                 , pos = addPos model.pos (x,y)
+                                 , pos = case enter of 
+                                           False -> addPos model.pos (x,y)
+                                           _ -> (0,-40)
                          }
                        , Cmd.none )
-           Waiting -> if (int2Pick pick1) == model.correct then
+           Waiting -> if model.lives == 0 then
+                        ( { model | animation = GameOver }, Cmd.none)
+                      else if (int2Pick pick1) == model.correct then
                         ( { model | animation = GoodPick <| model.badTime, score = model.score + 1 }, getRandChoices )
                       else if pick1 == 4 then
                        ( { model | time = t
@@ -157,6 +181,7 @@ update msg m =
                   then ( { model | time = t
                                , animation = Waiting
                                , pos = (0,-40)
+                               , lives = model.lives - 1
                          }
                        , Cmd.none )
                   else ( { model | time = t
@@ -187,11 +212,27 @@ update msg m =
                                , pos = (0,-40)
                          }
                        , Cmd.none )
+           GameOver -> ( model, Cmd.none)
                        
 view : Model -> Collage Msg
 view model = collage 192 128
   <| ( case model.animation of
-           Startup ->  [ text "Read the word and tap on the picture!" |> size 20 |> filled (rgb 255 0 255) ]
+           Startup ->  [ text "Move the robot by WASD" |> centered |> size 10 |> filled red |> move (0,50) ]
+                       ++
+                       [ text "Try using WASD!" |> centered |> size 10 |> filled red |> move (0,40) ]
+                       ++
+                       [ text "Match the word with its picture!" |> centered |> size 10 |> filled red |> move (0,20) ]
+                       ++
+                       [ text "Get as much score as you can" |> centered |> size 10 |> filled red |> move (0,10) ]
+                       ++
+                       [ text "without losing all hearts" |> centered |> size 10 |> filled red |> move (0,0) ]
+                       ++
+                       [ text "Press Enter to start" |> centered |> size 10 |> filled red |> move (0,-20) ]
+                       ++
+                       [object |> move model.pos]
+           GameOver -> [ text "Game over!" |> centered |> size 20 |> filled red |> move (0,10) ]
+                       ++
+                       [ text "You got --->" |> centered |> size 10 |> filled red |> move (0,-40) ]
            Waiting ->  ( List.map2 (drawPic model.time) model.pics pickPositions )
                        ++
                        (List.indexedMap (oneLetter 0 1) model.letters)
@@ -208,11 +249,9 @@ view model = collage 192 128
                        ++
                        ( List.indexedMap (oneLetter tLeft model.badTime) model.letters)
                        ++
-                       [ "Score: " ++ String.fromInt model.score |> text |> bold |> fixedwidth |> filled (rgb (125 + 125 * sin (20 * model.time)) 0 0) |> move (10,-4) ]
-     ) ++[ "Score: " ++ String.fromInt model.score |> text |> fixedwidth |> filled black |> move (10,-4)
-         -- when you make your own game, you can use this to display debug information
-         --, model.debug |> text |> filled blue |> move (-86,-20)
-         ]
+                       [ "Score: " ++ String.fromInt model.score |> text |> bold |> fixedwidth |> filled (rgb (125 + 125 * sin (20 * model.time)) 0 0) |> move (30,-40) ]
+     ) ++[ "Score: " ++ String.fromInt model.score |> text |> fixedwidth |> filled black |> move (30,-40)]
+       ++ hearts model.lives
 drawMsg t pic (msg, pos) = group [ rect 80 55 |> filled (rgba 0 0 0 0) |> move pos ]-- |> notifyTap (Choice msg)                                    ]
 drawPic t pic (msg, pos) = (group <| pic { time = t }) |> clip (rect 192 128 |> ghost) |> scale dScale |> move pos
 drawBad pick t pic (msg, pos) = if pick == msg
